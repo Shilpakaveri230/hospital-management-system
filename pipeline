@@ -1,111 +1,72 @@
-pipeline {
+pipelines{
     agent any
-
+    tools{
+        jdk 'jdk17'
+        nodejs 'node16'
+    }
     environment {
-        // Define environment variables
-        APP_NAME = 'HospitalManagementSystem'
-        REPO_URL = 'https://github.com/Shilpakaveri230/hospital-management-system.git'
-        BRANCH = 'main'
-        DEPLOY_SERVER = 'shilpakaveri230@http://65.2.179.191:8081:/path/to/deploy'
+        SCANNER_HOME=tool 'sonnar-scanner'
     }
-
     stages {
-        stage('Checkout') {
-            steps {
-                echo 'Checking out the code from the repository...'
-                git branch: "${BRANCH}", url: "${REPO_URL}"
+        stage('clean workspace'){
+            steps{
+                cleanWs()
+            }
+        }   
+        stage('Checkout form Git'){
+            steps{
+                git branch: 'main', url: 'https://github.com/Shilpakaveri230/hospital-management-system.git'
             }
         }
-
-        stage('Build') {
-            steps {
-                echo 'Building the application...'
-                // Adjust the build step according to the tech stack used
-                // Example for a Java project
-                sh 'mvn clean install'
-                // Example for a Node.js project
-                // sh 'npm install && npm run build'
+        stage("Sonarqube Analysis "){
+            steps{
+                withSonarQubeEnv('sonnar-server') {
+                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=hospital-management-system \
+                    -Dsonar.projectKey=hospital-management-system '''
+                }    
             }
         }
-
-        stage('Test') {
+        stage("quality gate"){
             steps {
-                echo 'Running tests...'
-                // Run test suites
-                sh 'mvn test' // Example for a Java project
-                // sh 'npm test' // Example for a Node.js project
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token' 
+                }
             }
         }
-
-        stage('Code Analysis') {
+        stage('Install Dependencies') {
             steps {
-                echo 'Performing static code analysis...'
-                // Example using SonarQube for Java projects
-                sh 'mvn sonar:sonar'
-                // For other tools, adjust accordingly
+                sh "npm install"
             }
         }
-
-        stage('Package') {
+        stage('OWASP FS SCAN') {
             steps {
-                echo 'Packaging the application...'
-                // Package the application into a deployable format
-                sh 'mvn package' // Example for a Java project
-                // sh 'zip -r app.zip dist/' // Example for a Node.js project
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
             }
         }
-
-        stage('Deploy to Staging') {
+        stage('TRIVY FS SCAN') {
             steps {
-                echo 'Deploying to the staging server...'
-                // Deploy the application to the staging environment
-                sh 'scp target/*.jar ${DEPLOY_SERVER}/staging/' // Java project
-                // sh 'scp -r dist/* ${DEPLOY_SERVER}/staging/' // Node.js project
+                sh "trivy fs . > trivyfs.txt"
             }
         }
-
-        stage('Smoke Test') {
-            steps {
-                echo 'Running smoke tests on the staging server...'
-                // Basic health check or smoke tests
-                sh 'curl -f http://staging-server-ip/health'
+        stage("Docker Build & Push"){
+            stepss{
+                scripts{
+                   withDockerRegistry(credentialsId: 'docker', toolName: 'docker'){
+                       sh "docker tag hospital-management-system shilpakaveri230/hospital-management-system:latest "
+                       sh "docker push shilpakaveri230/hospital-management-system:latest "
+                    }
+                }
             }
         }
-
-        stage('Approval') {
-            steps {
-                input message: 'Do you want to deploy to production?', ok: 'Deploy'
+        stage("Scan Docker Image with TRIVY"){
+            steps{
+                sh "trivy image shilpakaveri230/hospital-management-system:latest > trivy.txt" 
             }
         }
-
-        stage('Deploy to Production') {
-            steps {
-                echo 'Deploying to the production server...'
-                // Deploy the application to the production environment
-                sh 'scp target/*.jar ${DEPLOY_SERVER}/production/' // Java project
-                // sh 'scp -r dist/* ${DEPLOY_SERVER}/production/' // Node.js project
+        stage('Deploy to container'){
+            steps{
+                sh 'docker run -d --name hospital-management-system -p 8081:80 shilpakaveri230/hospital-management-system:latest'
             }
-        }
-
-        stage('Post-deployment Tests') {
-            steps {
-                echo 'Running post-deployment tests on the production server...'
-                // Ensure the application is functioning correctly in production
-                sh 'curl -f http://production-server-ip/health'
-            }
-        }
+        } 
     }
-
-    post {
-        always {
-            echo 'Cleaning up workspace...'
-            cleanWs()
-        }
-        success {
-            echo 'Pipeline completed successfully.'
-        }
-        failure {
-            echo 'Pipeline failed. Please check the logs.'
-        }
-    }
-}
