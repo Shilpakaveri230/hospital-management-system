@@ -1,11 +1,11 @@
-pipelines{
+pipeline{
     agent any
     tools{
         jdk 'jdk17'
         nodejs 'node16'
     }
     environment {
-        SCANNER_HOME=tool 'sonnar-scanner'
+        SCANNER_HOME=tool 'sonar-scanner'
     }
     stages {
         stage('clean workspace'){
@@ -20,7 +20,7 @@ pipelines{
         }
         stage("Sonarqube Analysis "){
             steps{
-                withSonarQubeEnv('sonnar-server') {
+                withSonarQubeEnv('sonar-server') {
                     sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=hospital-management-system \
                     -Dsonar.projectKey=hospital-management-system '''
                 }    
@@ -50,9 +50,9 @@ pipelines{
             }
         }
         stage("Docker Build & Push"){
-            stepss{
-                scripts{
-                   withDockerRegistry(credentialsId: 'docker', toolName: 'docker'){
+            steps{
+                script{
+                   withDockerRegistry(credentialsId: 'docker', toolName: 'docker'){   
                        sh "docker tag hospital-management-system shilpakaveri230/hospital-management-system:latest "
                        sh "docker push shilpakaveri230/hospital-management-system:latest "
                     }
@@ -61,12 +61,13 @@ pipelines{
         }
         stage("Scan Docker Image with TRIVY"){
             steps{
-                sh "trivy image shilpakaveri230/hospital-management-system:latest > trivy.txt" 
+                sh "trivy image shilpakaveri230:latest > trivy.txt" 
             }
         }
         stage('Deploy to container'){
             steps{
                 sh 'docker run -d --name hospital-management-system -p 8081:80 shilpakaveri230/hospital-management-system:latest'
             }
-        } 
+        }
     }
+}
